@@ -1,0 +1,16 @@
+{
+    "folders":
+    [
+        {
+            "path": ".",
+            "folder_exclude_patterns": [".eunit", "logs", "deps/*/test", "_rel"],
+            "file_exclude_patterns": ["*.beam", "*.app", ".tags*"]
+        }
+    ],
+    "settings": {
+        "ctags_command": "ctags --languages=erlang --erlang-kinds=-dr --exclude=test -R -f .tags",
+        "ctags_extra_tag_files": [
+            "/home/keynslug/workspace/erlang/lib/.tags"
+        ]
+    }
+}
