@@ -21,7 +21,7 @@
 -spec start_link() -> {ok, pid()}.
 
 start_link() ->
-	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 subscribe() ->
     gen_server:call(?MODULE, {subscribe, self()}, infinity).
@@ -32,7 +32,7 @@ unsubscribe() ->
 %% gen_server.
 
 init([]) ->
-	{ok, [], 0}.
+    {ok, [], 0}.
 
 handle_call({subscribe, Pid}, _From, State) ->
     case lists:keymember(Pid, 1, State) of
@@ -70,13 +70,13 @@ handle_info({'DOWN', _, process, Pid, _}, State) ->
 
 handle_info(Info, State) ->
     lager:warning("unexpected info: ~p", [Info]),
-	{noreply, State, 0}.
+    {noreply, State, 0}.
 
 terminate(_Reason, _State) ->
-	ok.
+    ok.
 
 code_change(_OldVsn, State, _Extra) ->
-	{ok, State}.
+    {ok, State}.
 
 %%
 
