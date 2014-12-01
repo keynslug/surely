@@ -57,7 +57,7 @@ handle_cast(Msg, State) ->
     noreply({ok, State}).
 
 handle_info({'EXIT', Pid, {stats, Stats}}, State = #state{pid = Pid}) ->
-    noreply(do_broadcast(Stats, State#state{pid = gather_stats()}));
+    noreply(do_broadcast(Stats, State#state{pid = gather_stats(), last = Stats}));
 
 handle_info({'EXIT', Pid, Error}, State = #state{pid = Pid}) ->
     {stop, Error, State};
@@ -93,7 +93,13 @@ do_subscribe(Pid, State = #state{subs = Subs, last = Last}) ->
     case lists:member(Pid, Subs) of
         false ->
             true = link(Pid),
-            ok = if not Last =:= undefined -> do_unicast(Last, Pid); true -> ok end,
+            ok = case Last of
+                L when L =/= undefined ->
+                    lager:debug("sending cached stats ..."),
+                    do_unicast(Last, Pid);
+                _ ->
+                    ok
+            end,
             {ok, State#state{subs = [Pid | Subs]}};
         true ->
             {{error, exists}, State}
