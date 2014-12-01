@@ -3,9 +3,9 @@
 
 %% API
 
--export([start_link/0]).
--export([subscribe/0]).
--export([unsubscribe/0]).
+-export([start_link/1]).
+-export([subscribe/2]).
+-export([unsubscribe/2]).
 
 %% gen_server
 
@@ -18,71 +18,114 @@
 
 %% API
 
--spec start_link() -> {ok, pid()}.
+-spec start_link(node()) -> {ok, pid()}.
 
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+start_link(Node) ->
+    Name = construct_name(Node),
+    gen_server:start_link({local, Name}, ?MODULE, Node, []).
 
-subscribe() ->
-    gen_server:call(?MODULE, {subscribe, self()}, infinity).
+subscribe(Node, SubscriberPid) ->
+    gen_server:call(construct_name(Node), {subscribe, SubscriberPid}, infinity).
 
-unsubscribe() ->
-    gen_server:call(?MODULE, {unsubscribe, self()}, infinity).
+unsubscribe(Node, SubscriberPid) ->
+    gen_server:call(construct_name(Node), {unsubscribe, SubscriberPid}, infinity).
 
-%% gen_server.
+construct_name(Node) ->
+    list_to_atom(?MODULE_STRING ++ "_" ++ atom_to_list(Node)).
 
-init([]) ->
-    {ok, [], 0}.
+%% gen_server
+
+-record(state, {node, subs, pid, last}).
+
+init(Node) ->
+    lager:info("starting up for: ~p ...", [Node]),
+    _ = process_flag(trap_exit, true),
+    {ok, #state{node = Node, subs = [], pid = gather_stats()}}.
 
 handle_call({subscribe, Pid}, _From, State) ->
-    case lists:keymember(Pid, 1, State) of
-        true ->
-            {reply, ok, State, 0};
-        false ->
-            {reply, ok, [{Pid, erlang:monitor(process, Pid)} | State], 0}
-    end;
+    reply(do_subscribe(Pid, State));
 
 handle_call({unsubscribe, Pid}, _From, State) ->
-    case lists:keyfind(Pid, 1, State) of
-        {Pid, MRef} ->
-            _ = erlang:demonitor(MRef, [flush]),
-            {reply, ok, lists:keydelete(Pid, 1, State), 0};
-        false ->
-            {reply, error, State, 0}
-    end;
+    reply(do_unsubscribe(Pid, State));
 
 handle_call(Request, _From, State) ->
     lager:warning("unexpected call: ~p", [Request]),
-    {reply, error, State, 0}.
+    reply({error, State}).
 
 handle_cast(Msg, State) ->
     lager:warning("unexpected cast: ~p", [Msg]),
-    {noreply, State, 0}.
+    noreply({ok, State}).
 
-handle_info(timeout, State) ->
-    Interval = 2000,
-    Stats = gather_stats(Interval),
-    _ = [Pid ! {stats, Stats} || {Pid, _} <- State],
-    {noreply, State, 0};
+handle_info({'EXIT', Pid, {stats, Stats}}, State = #state{pid = Pid}) ->
+    noreply(do_broadcast(Stats, State#state{pid = gather_stats()}));
 
-handle_info({'DOWN', _, process, Pid, _}, State) ->
-    {noreply, lists:keydelete(Pid, 1, State), 0};
+handle_info({'EXIT', Pid, Error}, State = #state{pid = Pid}) ->
+    {stop, Error, State};
+
+handle_info({'EXIT', Pid, _Reason}, State) ->
+    noreply(do_unsubscribe(Pid, State));
 
 handle_info(Info, State) ->
     lager:warning("unexpected info: ~p", [Info]),
-    {noreply, State, 0}.
+    noreply({ok, State}).
 
 terminate(_Reason, _State) ->
-    ok.
+    lager:info("no more subscribers, shutting down ...").
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%
 
+reply({Result, State}) ->
+    {reply, Result, State}.
+
+noreply({_, State = #state{subs = []}}) ->
+    {stop, shutdown, State};
+
+noreply({_, State}) ->
+    {noreply, State}.
+
+%%
+
+do_subscribe(Pid, State = #state{subs = Subs, last = Last}) ->
+    lager:debug("subscribe: ~p", [Pid]),
+    case lists:member(Pid, Subs) of
+        false ->
+            true = link(Pid),
+            ok = if not Last =:= undefined -> do_unicast(Last, Pid); true -> ok end,
+            {ok, State#state{subs = [Pid | Subs]}};
+        true ->
+            {{error, exists}, State}
+    end.
+
+do_unsubscribe(Pid, State = #state{subs = Subs}) ->
+    lager:debug("unsubscribe: ~p", [Pid]),
+    case lists:member(Pid, Subs) of
+        true ->
+            _ = unlink(Pid),
+            {ok, State#state{subs = lists:delete(Pid, Subs)}};
+        false ->
+            {{error, notfound}, State}
+    end.
+
+do_broadcast(Stats, State = #state{subs = Subs}) ->
+    ok = lists:foreach(fun (Pid) -> do_unicast(Stats, Pid) end, Subs),
+    {ok, State}.
+
+do_unicast(Stats, Pid) ->
+    _ = Pid ! {stats, Stats}, ok.
+
+%%
+
+gather_stats() ->
+    Interval = genlib_app:env(surely, interval),
+    spawn_link(fun () -> gather_stats(Interval) end).
+
 gather_stats(Interval) ->
     {Abs, Rel} = recon:node_stats(1, Interval, fun (S, _) -> S end, []),
-    Abs ++ Rel ++ gather_additional_stats().
+    Stats = Abs ++ Rel ++ gather_additional_stats(),
+    exit({stats, Stats}).
 
 gather_additional_stats() ->
     {Wallclock, WallclockDiff} = erlang:statistics(wall_clock),

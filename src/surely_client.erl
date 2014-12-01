@@ -13,7 +13,7 @@ init(_, _, _) ->
 websocket_init(_, Req, _Opts) ->
     lager:info("new client connected"),
     Req2 = cowboy_req:compact(Req),
-    ok = surely_monitor:subscribe(),
+    ok = surely:subscribe(node()),
     {ok, Req2, []}.
 
 websocket_handle({text, Data}, Req, State) ->
@@ -37,9 +37,7 @@ websocket_info(Info, Req, State) ->
     {ok, Req, State}.
 
 websocket_terminate(_Reason, _Req, _State) ->
-    lager:info("client disconnected"),
-    ok = surely_monitor:unsubscribe(),
-    ok.
+    lager:info("client disconnected").
 
 %%
 

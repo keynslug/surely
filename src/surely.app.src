@@ -11,5 +11,8 @@
 		cowboy
 	]},
 	{mod, {surely, []}},
-	{env, []}
+	{env, [
+		{port, 8000},
+		{interval, 1000}
+	]}
 ]}.
